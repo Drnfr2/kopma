@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { formatRupiah, formatDate } from '@/lib/utils'
 import type { Investor, Role } from '@/types'
 
@@ -10,9 +9,20 @@ interface Props {
   role: Role
 }
 
+async function apiFetch(method: string, body?: object) {
+  const res = await fetch('/api/investor', {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Terjadi kesalahan')
+  return json
+}
+
 function Modal({ onClose, onSave, editData }: {
   onClose: () => void
-  onSave: (data: Omit<Investor, 'id' | 'created_at'>) => void
+  onSave: (data: Omit<Investor, 'id' | 'created_at'>) => Promise<string | null>
   editData?: Investor
 }) {
   const [form, setForm] = useState({
@@ -24,17 +34,31 @@ function Modal({ onClose, onSave, editData }: {
     status: (editData?.status || 'aktif') as 'aktif' | 'tidak_aktif',
     keterangan: editData?.keterangan || '',
   })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true); setError('')
+    const err = await onSave({ ...form, jumlah_investasi: Number(form.jumlah_investasi) })
+    if (err) { setError(err); setLoading(false) }
+  }
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ padding: '28px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1e293b' }}>
             {editData ? '✏️ Edit Investor' : '➕ Tambah Investor'}
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
         </div>
-        <form onSubmit={e => { e.preventDefault(); onSave({ ...form, jumlah_investasi: Number(form.jumlah_investasi) }) }}>
+        {error && (
+          <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 14px', color: '#dc2626', fontSize: '13px', marginBottom: '14px' }}>
+            ⚠️ {error}
+          </div>
+        )}
+        <form onSubmit={handleSubmit}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div><label>Nama Lengkap</label><input type="text" placeholder="Nama investor..." value={form.nama} onChange={e => setForm(f => ({ ...f, nama: e.target.value }))} required /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -47,14 +71,16 @@ function Modal({ onClose, onSave, editData }: {
             </div>
             <div><label>Status</label>
               <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as 'aktif' | 'tidak_aktif' }))}>
-                <option value="aktif">Aktif</option>
-                <option value="tidak_aktif">Tidak Aktif</option>
+                <option value="aktif">✅ Aktif</option>
+                <option value="tidak_aktif">❌ Tidak Aktif</option>
               </select>
             </div>
-            <div><label>Keterangan</label><textarea placeholder="Catatan tambahan..." value={form.keterangan} onChange={e => setForm(f => ({ ...f, keterangan: e.target.value }))} style={{ minHeight: '80px' }} /></div>
+            <div><label>Keterangan</label><textarea placeholder="Catatan tambahan..." value={form.keterangan} onChange={e => setForm(f => ({ ...f, keterangan: e.target.value }))} style={{ minHeight: '72px' }} /></div>
             <div style={{ display: 'flex', gap: '10px', paddingTop: '8px' }}>
               <button type="button" onClick={onClose} className="btn-secondary" style={{ flex: 1 }}>Batal</button>
-              <button type="submit" className="btn-primary" style={{ flex: 1 }}>Simpan</button>
+              <button type="submit" disabled={loading} className="btn-primary" style={{ flex: 1, opacity: loading ? 0.7 : 1 }}>
+                {loading ? 'Menyimpan...' : '💾 Simpan'}
+              </button>
             </div>
           </div>
         </form>
@@ -68,29 +94,39 @@ export default function InvestorClient({ initialData, role }: Props) {
   const [showModal, setShowModal] = useState(false)
   const [editItem, setEditItem] = useState<Investor | undefined>()
   const [search, setSearch] = useState('')
-  const supabase = createClient()
+  const [toast, setToast] = useState('')
 
   const isAdmin = role === 'admin'
   const filtered = data.filter(d => d.nama.toLowerCase().includes(search.toLowerCase()))
   const totalInvestasi = data.filter(d => d.status === 'aktif').reduce((s, d) => s + d.jumlah_investasi, 0)
   const investorAktif = data.filter(d => d.status === 'aktif').length
 
-  async function handleSave(form: Omit<Investor, 'id' | 'created_at'>) {
-    if (editItem) {
-      const { data: updated } = await supabase.from('investor').update(form).eq('id', editItem.id).select().single()
-      if (updated) setData(d => d.map(x => x.id === editItem.id ? updated : x))
-    } else {
-      const { data: created } = await supabase.from('investor').insert(form).select().single()
-      if (created) setData(d => [created, ...d])
-    }
-    setShowModal(false)
-    setEditItem(undefined)
+  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3000) }
+
+  async function handleSave(form: Omit<Investor, 'id' | 'created_at'>): Promise<string | null> {
+    try {
+      if (editItem) {
+        const { data: updated } = await apiFetch('PATCH', { id: editItem.id, ...form })
+        if (updated) setData(d => d.map(x => x.id === editItem.id ? updated : x))
+        showToast('Investor berhasil diupdate')
+      } else {
+        const { data: created } = await apiFetch('POST', form)
+        if (created) setData(d => [created, ...d])
+        showToast('Investor berhasil disimpan')
+      }
+      setShowModal(false)
+      setEditItem(undefined)
+      return null
+    } catch (e) { return (e as Error).message }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Yakin ingin menghapus data investor ini?')) return
-    await supabase.from('investor').delete().eq('id', id)
-    setData(d => d.filter(x => x.id !== id))
+    try {
+      await apiFetch('DELETE', { id })
+      setData(d => d.filter(x => x.id !== id))
+      showToast('Investor berhasil dihapus')
+    } catch (e) { alert((e as Error).message) }
   }
 
   return (
@@ -173,10 +209,12 @@ export default function InvestorClient({ initialData, role }: Props) {
                 {isAdmin && (
                   <td style={{ textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                      <button className="btn-secondary" onClick={() => { setEditItem(item); setShowModal(true) }}
-                        style={{ padding: '4px 10px', fontSize: '12px' }}>Edit</button>
-                      <button className="btn-danger" onClick={() => handleDelete(item.id)}
-                        style={{ padding: '4px 10px', fontSize: '12px' }}>Hapus</button>
+                      <button onClick={() => { setEditItem(item); setShowModal(true) }}
+                        title="Edit"
+                        style={{ width: '32px', height: '32px', borderRadius: '7px', border: '1px solid #e2e8f0', background: 'white', cursor: 'pointer', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✏️</button>
+                      <button onClick={() => handleDelete(item.id)}
+                        title="Hapus"
+                        style={{ width: '32px', height: '32px', borderRadius: '7px', border: '1px solid #fee2e2', background: '#fff5f5', cursor: 'pointer', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🗑️</button>
                     </div>
                   </td>
                 )}
@@ -188,6 +226,11 @@ export default function InvestorClient({ initialData, role }: Props) {
 
       {showModal && (
         <Modal onClose={() => { setShowModal(false); setEditItem(undefined) }} onSave={handleSave} editData={editItem} />
+      )}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 100, background: '#0f172a', color: 'white', borderRadius: '12px', padding: '14px 20px', fontSize: '14px', fontWeight: '500', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+          ✅ {toast}
+        </div>
       )}
     </div>
   )

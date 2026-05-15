@@ -1,22 +1,21 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import DashboardClient from './DashboardClient'
+
+export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [
-    { data: profile },
-    { data: pemasukan },
-    { data: pengeluaran },
-    { data: investor },
-  ] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user!.id).maybeSingle(),
-    supabase.from('pemasukan').select('*').order('tanggal', { ascending: false }),
-    supabase.from('pengeluaran').select('*').order('tanggal', { ascending: false }),
-    supabase.from('investor').select('*'),
+  const admin = createAdminClient()
+  const [{ data: profile }, { data: pemasukan }, { data: pengeluaran }, { data: investor }] = await Promise.all([
+    admin.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+    admin.from('pemasukan').select('*').order('tanggal', { ascending: false }),
+    admin.from('pengeluaran').select('*').order('tanggal', { ascending: false }),
+    admin.from('investor').select('*'),
   ])
 
   const totalPemasukan = (pemasukan || []).reduce((sum, p) => sum + p.jumlah, 0)

@@ -159,17 +159,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div style={{
-            marginTop: '24px',
-            padding: '16px',
-            background: 'rgba(255,255,255,0.05)',
-            borderRadius: '10px',
-            border: '1px solid rgba(255,255,255,0.08)',
-          }}>
-            <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '8px' }}>Akun Demo:</p>
-            <p style={{ color: '#94a3b8', fontSize: '12px' }}>Admin: admin@kopma.ac.id</p>
-            <p style={{ color: '#94a3b8', fontSize: '12px' }}>Mahasiswa: mahasiswa@kopma.ac.id</p>
-          </div>
         </div>
       </div>
     </div>

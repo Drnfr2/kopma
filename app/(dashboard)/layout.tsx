@@ -1,7 +1,10 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import Sidebar from '@/components/Sidebar'
 import type { Profile } from '@/types'
+
+export const dynamic = 'force-dynamic'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -9,28 +12,27 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect('/login')
 
-  let { data: profile } = await supabase
+  // Gunakan admin client agar bypass RLS — selalu dapat data yang benar
+  const admin = createAdminClient()
+  let { data: profile } = await admin
     .from('profiles')
     .select('*')
     .eq('id', user.id)
     .maybeSingle()
 
-  // Auto-create jika profile belum ada (user dibuat sebelum trigger dipasang)
+  // Auto-create jika benar-benar belum ada (jangan pakai upsert)
   if (!profile) {
-    const { data: created } = await supabase
-      .from('profiles')
-      .upsert({
-        id: user.id,
-        email: user.email ?? '',
-        full_name: user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'Pengguna',
-        role: 'mahasiswa',
-      }, { onConflict: 'id' })
-      .select()
-      .maybeSingle()
-    profile = created
+    await admin.from('profiles').insert({
+      id: user.id,
+      email: user.email ?? '',
+      full_name: user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'Pengguna',
+      role: 'mahasiswa',
+    })
+    const { data: fresh } = await admin
+      .from('profiles').select('*').eq('id', user.id).maybeSingle()
+    profile = fresh
   }
 
-  // Fallback agar tidak redirect loop jika DB bermasalah
   const safeProfile: Profile = profile ?? {
     id: user.id,
     email: user.email ?? '',

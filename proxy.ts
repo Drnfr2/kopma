@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -23,15 +23,19 @@ export async function middleware(request: NextRequest) {
     }
   )
 
+  // Refresh session — wajib ada agar cookie auth tetap aktif
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isAuthPage = request.nextUrl.pathname.startsWith('/login')
-  const isPublicPage = request.nextUrl.pathname === '/'
+  const { pathname } = request.nextUrl
+  const isAuthPage = pathname.startsWith('/login')
+  const isPublicPage = pathname === '/'
 
+  // Belum login → redirect ke /login
   if (!user && !isAuthPage && !isPublicPage) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
+  // Sudah login → jangan masuk halaman login lagi
   if (user && isAuthPage) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
